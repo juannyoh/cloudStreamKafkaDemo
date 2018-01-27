@@ -3,6 +3,8 @@ package com.dituhui.saas.websocket;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 import javax.annotation.Resource;
@@ -16,6 +18,7 @@ import javax.websocket.server.ServerEndpoint;
 
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import com.dituhui.saas.alan.a.in.SpringUtils;
 
@@ -26,7 +29,9 @@ public class MyWebSocket {
 	private static int onlineCount = 0;
 
 	// concurrent包的线程安全Set，用来存放每个客户端对应的MyWebSocket对象。
-	private static CopyOnWriteArraySet<MyWebSocket> webSocketSet = new CopyOnWriteArraySet<MyWebSocket>();
+//	private static CopyOnWriteArraySet<MyWebSocket> webSocketSet = new CopyOnWriteArraySet<MyWebSocket>();
+	
+	private static ConcurrentMap<String, MyWebSocket> concurrentMapWordCounts = new ConcurrentHashMap<>(); 
 
 	// 与某个客户端的连接会话，需要通过它来给客户端发送数据
 	private Session session;
@@ -46,7 +51,7 @@ public class MyWebSocket {
 			System.out.println("ak:"+ak+"["+address.getHostAddress()+"]");
 			this.session = session;
 			redisTemplate.opsForValue().set(ak, address.getHostAddress());
-			webSocketSet.add(this); // 加入set中
+			concurrentMapWordCounts.put(ak,this); // 加入set中
 			addOnlineCount(); // 在线数加1
 			System.out.println("["+address.getHostAddress()+"]有新连接加入！当前在线人数为" + getOnlineCount());
 			sendMessage("11111");
@@ -59,8 +64,8 @@ public class MyWebSocket {
 	 * 连接关闭调用的方法
 	 */
 	@OnClose
-	public void onClose() {
-		webSocketSet.remove(this); // 从set中删除
+	public void onClose(@PathParam("ak") String ak) {
+		concurrentMapWordCounts.remove(ak); // 从set中删除
 		subOnlineCount(); // 在线数减1
 		System.out.println("有一连接关闭！当前在线人数为" + getOnlineCount());
 	}
@@ -81,17 +86,27 @@ public class MyWebSocket {
 				// TODO Auto-generated catch block
 				e1.printStackTrace();
 			}
-
+			String [] mes=payload.split("-");
 			System.out.println("来自客户端的消息:" + payload);
-
-			// 群发消息
-			for (MyWebSocket item : webSocketSet) {
+			
+			for(String key:concurrentMapWordCounts.keySet()){
 				try {
-					item.sendMessage(payload);
-				} catch (IOException e) {
-					e.printStackTrace();
+					if(key.equalsIgnoreCase(mes[0])){
+						concurrentMapWordCounts.get(key).sendMessage(payload);
+					}
+				} catch (Exception e) {
+					continue;
 				}
 			}
+
+			// 群发消息
+//			for (MyWebSocket item : webSocketSet) {
+//				try {
+//					item.sendMessage(payload);
+//				} catch (IOException e) {
+//					e.printStackTrace();
+//				}
+//			}
 		}
 
 	}
@@ -114,13 +129,21 @@ public class MyWebSocket {
 	 * 群发自定义消息
 	 * */
 	public static void sendInfo(String message) throws IOException {
-		for (MyWebSocket item : webSocketSet) {
+		for(String key:concurrentMapWordCounts.keySet()){
 			try {
-				item.sendMessage(message);
-			} catch (IOException e) {
+				concurrentMapWordCounts.get(key).sendMessage(message);
+			} catch (Exception e) {
 				continue;
 			}
 		}
+		
+//		for (MyWebSocket item : webSocketSet) {
+//			try {
+//				item.sendMessage(message);
+//			} catch (IOException e) {
+//				continue;
+//			}
+//		}
 	}
 
 	public static synchronized int getOnlineCount() {
